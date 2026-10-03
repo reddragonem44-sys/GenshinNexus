@@ -77,8 +77,10 @@ async def genshinnexus_security_shield(request: Request, call_next):
     response = await call_next(request)
     
     # 3. Complete Server Anonymization (Strips version leaks)
-    response.headers.pop("Server", None)
-    response.headers.pop("X-Powered-By", None)
+    if "Server" in response.headers:
+    del response.headers["Server"]
+if "X-Powered-By" in response.headers:
+    del response.headers["X-Powered-By"]
     return response
 
 # Standard Rate Controls Configuration
