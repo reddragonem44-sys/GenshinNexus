@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Browse the cloud-indexed Genshin Impact character archive." />
+    <title>Character Archive | GenshinNexus</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body data-page="archive">
+    <div class="portal-shell archive-shell">
+      <header class="portal-header">
+        <a class="brand" href="/" aria-label="Back to GenshinNexus">
+          <span class="brand-symbol">✦</span>
+          <span><small>GENSHINNEXUS</small><strong>Character Archive</strong></span>
+        </a>
+        <a class="archive-link" href="/">Return to portal <span aria-hidden="true">↗</span></a>
+      </header>
+
+      <main>
+        <section class="archive-intro">
+          <p class="eyebrow">CLOUD CHARACTER INDEX <span class="status-dot"></span></p>
+          <div class="archive-title-row"><div><h1>Faces of <em>Teyvat.</em></h1><p>Live character records, with artwork served directly from the cloud.</p></div><span class="archive-count" id="archiveCount">Loading roster</span></div>
+        </section>
+
+        <section class="archive-controls" aria-label="Character filters">
+          <div class="element-filters" id="elementFilters">
+            <button class="filter-chip active" data-element="all" type="button">All</button>
+            <button class="filter-chip" data-element="Pyro" type="button">Pyro</button>
+            <button class="filter-chip" data-element="Hydro" type="button">Hydro</button>
+            <button class="filter-chip" data-element="Anemo" type="button">Anemo</button>
+            <button class="filter-chip" data-element="Electro" type="button">Electro</button>
+            <button class="filter-chip" data-element="Dendro" type="button">Dendro</button>
+            <button class="filter-chip" data-element="Cryo" type="button">Cryo</button>
+            <button class="filter-chip" data-element="Geo" type="button">Geo</button>
+          </div>
+          <label class="search-box archive-search"><span aria-hidden="true">⌕</span><input id="archiveSearch" type="search" placeholder="Find a character" autocomplete="off" /></label>
+        </section>
+        <p class="catalog-status" id="archiveStatus" role="status">Connecting to the cloud archive…</p>
+        <section class="character-grid" id="characterGrid" aria-label="Character collection"></section>
+      </main>
+      <footer class="portal-footer"><span>GENSHINNEXUS</span><span>Character art hotlinked from genshin.jmp.blue</span></footer>
+    </div>
+    <script src="/static/script.js"></script>
+  </body>
+</html>
