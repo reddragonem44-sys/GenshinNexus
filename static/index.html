@@ -2,96 +2,85 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>GenshinNexus Cloud Portal</title>
+    <title>AIVerse-Nexus Global Controller</title>
     <style>
-        body { background-color: #0b0f19; color: #f3f4f6; font-family: sans-serif; margin: 0; padding: 20px; }
-        .grid-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; max-width: 900px; margin: 0 auto; }
-        .tile { background-color: #111827; border: 1px solid #d97706; padding: 20px; border-radius: 8px; cursor: pointer; text-align: center; transition: transform 0.2s; font-weight: bold; }
-        .tile:hover { transform: translateY(-3px); box-shadow: 0 4px 15px rgba(217, 119, 6, 0.4); }
-        select, option { background-color: #111827 !important; color: #f3f4f6 !important; border: 1px solid #d97706; padding: 12px; border-radius: 4px; width: 100%; max-width: 350px; font-size: 16px; display: block; margin: 0 auto; }
-        .panel { display: none; background-color: #111827; border: 2px solid #d97706; border-radius: 8px; padding: 25px; max-width: 700px; margin: 25px auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        #security-card { display: none; background: #111827; border: 2px solid #ef4444; border-radius: 8px; padding: 30px; text-align: center; max-width: 400px; margin: 40px auto; }
-        .btn { background-color: #d97706; color: #111827; font-weight: bold; border: none; padding: 10px 25px; border-radius: 4px; cursor: pointer; margin-top: 15px; }
-        .admin-console { max-width: 400px; margin: 30px auto; text-align: center; padding: 15px; background: #161e2e; border-radius: 6px; border: 1px dashed #d97706; }
-        .admin-input { background: #0b0f19; border: 1px solid #d97706; color: #f3f4f6; padding: 8px; border-radius: 4px; width: 60%; }
-        .build-card { background: #1c2541; padding: 15px; border-radius: 6px; border-left: 4px solid #d97706; margin-top: 15px; }
+        body { background-color: #060913; color: #38bdf8; font-family: 'Courier New', monospace; margin: 0; padding: 20px; }
+        .grid-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; max-width: 1000px; margin: 0 auto; }
+        .tile { background-color: #0f172a; border: 1px solid #38bdf8; padding: 25px; border-radius: 6px; cursor: pointer; text-align: center; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: #38bdf8; transition: all 0.2s ease-in-out; }
+        .tile:hover { transform: translateY(-2px); border-color: #a855f7; box-shadow: 0 0 15px rgba(168, 85, 247, 0.4); color: #a855f7; }
+        select, option { background-color: #0f172a !important; color: #38bdf8 !important; border: 1px solid #38bdf8; padding: 12px; border-radius: 4px; width: 100%; max-width: 450px; font-size: 15px; display: block; margin: 0 auto; font-family: inherit; }
+        .panel { display: none; background-color: #0f172a; border: 2px solid #a855f7; border-radius: 6px; padding: 25px; max-width: 800px; margin: 25px auto; box-shadow: 0 0 25px rgba(0,0,0,0.7); }
+        #security-card { display: none; background: #0f172a; border: 2px solid #ef4444; border-radius: 6px; padding: 30px; text-align: center; max-width: 450px; margin: 40px auto; }
+        .btn { background-color: #38bdf8; color: #060913; font-weight: bold; border: none; padding: 10px 25px; border-radius: 4px; cursor: pointer; margin-top: 15px; font-family: inherit; text-transform: uppercase; }
+        .btn:hover { background-color: #a855f7; color: #fff; }
+        .admin-console { max-width: 450px; margin: 40px auto; text-align: center; padding: 20px; background: #0b1329; border-radius: 6px; border: 1px dashed #38bdf8; }
+        .admin-input { background: #060913; border: 1px solid #38bdf8; color: #38bdf8; padding: 10px; border-radius: 4px; width: 60%; font-family: inherit; text-align: center; }
+        .node-card { background: #1e293b; padding: 20px; border-radius: 4px; border-left: 4px solid #a855f7; margin-top: 15px; color: #f8fafc; }
     </style>
 </head>
 <body>
     <div id="main-ui">
-        <h1 style="text-align: center; color: #d97706; letter-spacing: 2px;">🌌 GENSHINNEXUS OMNI-AI PORTAL</h1>
+        <h1 style="text-align: center; color: #38bdf8; letter-spacing: 3px; font-weight: 900;">🌐 AIVERSE-NEXUS CENTRAL CONTROLLER</h1>
+        <p style="text-align: center; color: #64748b; font-size: 14px; margin-bottom: 30px;">[ DECENTRALIZED DATA GATEWAY MAPPED TO 47,000+ INFRASTRUCTURE TOOLS ]</p>
         
-        <div style="margin-bottom: 30px;">
-            <select id="char-select" onchange="loadCharacterBuild()">
-                <option value="">-- [Cloud Sync] Select Character Database --</option>
-                <option value="vodyanitsa">Vodyanitsa (Version 7.1 New!)</option>
-                <option value="vesna">Vesna (Version 7.1 New!)</option>
-                <option value="skirk">Skirk (Upcoming Master Rerun)</option>
-                <option value="raiden">Raiden Shogun (Electro Core)</option>
+        <div style="margin-bottom: 40px;">
+            <select id="ai-select" onchange="loadAIType()">
+                <option value="">-- [CLOUD SYNC] SELECT REGISTRY INTERFACE --</option>
+                <option value="text_models">LLMs & Intelligent Agents (18k+ Live)</option>
+                <option value="image_video">Generative Media & Vision Clusters (12k+ Live)</option>
+                <option value="voice_audio">Neural Voice & Speech Synth (8k+ Live)</option>
+                <option value="autonomous_dev">Autonomous Dev Spaces & Sweepers (7k+ Live)</option>
             </select>
         </div>
 
-        <div id="build-panel" class="panel"><h2>Omni-AI Equipment Profile</h2><div id="build-content"></div></div>
+        <div id="build-panel" class="panel"><h2>Registry Category Operational Profile</h2><div id="build-content"></div></div>
 
         <div class="grid-container">
-            <div class="tile" onclick="openAbyss()">🏟️ Spiral Abyss (Floors 1-12)</div>
-            <div class="tile" onclick="openTheater()">🎭 Imaginarium Theater</div>
-            <div class="tile">⚔️ Live Weapon CDNs</div>
-            <div class="tile">🌸 Global Artifact Trees</div>
-            <div class="tile">📦 Materials Cache Math</div>
-            <div class="tile">⏳ Real-Time Banner Tickers</div>
+            <div class="tile" onclick="openMatrixMap()">📡 Federated Storage Matrix (Clusters 1-12)</div>
+            <div class="tile" onclick="alert('Querying global latency routers...')">⏱️ Global Edge Real-Time Latency</div>
+            <div class="tile" onclick="alert('Accessing API Token Registry...')">🔑 Multi-AI Secret Vault Logs</div>
+            <div class="tile" onclick="alert('Scanning automated firewall metrics...')">🛡️ Firewall Intrusion Scans</div>
+            <div class="tile" onclick="alert('Syncing live developer pipelines...')">📦 Open-Source Git Stream</div>
+            <div class="tile" onclick="alert('Accessing system activity logs...')">📊 System Load Distribution</div>
         </div>
 
-        <div id="abyss-panel" class="panel"><h2>Spiral Abyss Tactical Command</h2><div id="abyss-content"></div></div>
-        <div id="theater-panel" class="panel"><h2>Imaginarium Theater Deployment</h2><div id="theater-content"></div></div>
+        <div id="abyss-panel" class="panel"><h2>Federated Network Topology</h2><div id="abyss-content"></div></div>
 
         <div class="admin-console">
-            <h4 style="margin: 0 0 10px 0; color: #d97706;">🔒 Secure Admin Terminal</h4>
-            <input type="password" id="admin-pass" class="admin-input" placeholder="Enter Token Command...">
-            <button class="btn" style="margin-top:0; padding: 8px 15px;" onclick="authenticateAdmin()">Verify</button>
-            <div id="admin-status" style="font-size:12px; margin-top:8px; color:#9ca3af;"></div>
+            <h4 style="margin: 0 0 12px 0; color: #38bdf8; letter-spacing: 1px;">🔒 SYSTEM SECURE TERMINAL</h4>
+            <input type="password" id="admin-pass" class="admin-input" placeholder="ENTER ACCESS CODE...">
+            <button class="btn" style="margin-top:0; padding: 10px 20px;" onclick="authenticateAdmin()">Unlock</button>
+            <div id="admin-status" style="font-size:12px; margin-top:10px; color:#64748b;"></div>
         </div>
     </div>
 
     <div id="security-card">
-        <h2 style="color: #ef4444;">🚨 Anti-Velocity Firewall</h2>
-        <p>Verification challenge active. Please wait for parameters to cycle.</p>
-        <div id="timer" style="font-size: 28px; font-weight: bold; margin: 15px 0; color: #ef4444;">30</div>
-        <button class="btn" onclick="clearSecurity()">Clear Security Gate</button>
+        <h2 style="color: #ef4444;">🚨 VELOCITY INTERCEPT ACTIVE</h2>
+        <p>Omni-AI firewall defense protocol initialized. Challenge delay in progress.</p>
+        <div id="timer" style="font-size: 32px; font-weight: bold; margin: 15px 0; color: #ef4444;">30</div>
+        <button class="btn" onclick="clearSecurity()">Clear Threat Protocol</button>
     </div>
 
     <script>
-        async function loadCharacterBuild() {
-            let slug = document.getElementById('char-select').value;
-            if(!slug) return;
-            let r = await fetch('/api/characters/all-builds');
+        async function loadAIType() {
+            let cat = document.getElementById('ai-select').value;
+            if(!cat) return;
+            let r = await fetch('/api/ai/tools-directory');
             if(r.status === 403) { showSecurity(); return; }
             let d = await r.json();
-            let c = d[slug];
+            let c = d[cat];
             document.getElementById('abyss-panel').style.display = 'none';
-            document.getElementById('theater-panel').style.display = 'none';
             let panel = document.getElementById('build-panel'); panel.style.display = 'block';
-            document.getElementById('build-content').innerHTML = `<div class="build-card"><h3>${slug.toUpperCase()} (${c.vision} - ${c.rarity})</h3><p><b>Best-In-Slot Artifacts:</b> ${c.artifact_bis}</p><p><b>Main Stat Targets:</b> ${c.main_stats}</p><p><b>Substat Priority:</b> ${c.sub_priorities}</p><p><b>Recommended Cloud Weaponry:</b> ${c.weapon_bis}</p></div>`;
+            document.getElementById('build-content').innerHTML = `<div class="node-card"><h3>${c.title} [${c.global_status}]</h3><p><b>Active Tool Count:</b> ${c.active_count}</p><p><b>Primary Connected Nodes:</b> ${c.top_nodes.join(', ')}</p><p><b>Gateway Response Latency:</b> ${c.latency}</p></div>`;
         }
 
-        async function openAbyss() {
-            let r = await fetch('/api/abyss/all-floors');
+        async function openMatrixMap() {
+            let r = await fetch('/api/ai/cloud-matrix');
             if(r.status === 403) { showSecurity(); return; }
             let d = await r.json();
-            document.getElementById('theater-panel').style.display = 'none';
             document.getElementById('build-panel').style.display = 'none';
             let panel = document.getElementById('abyss-panel'); panel.style.display = 'block';
-            document.getElementById('abyss-content').innerHTML = `<h3>Active Floor 12 Framework</h3><p><b>Abyssal Blessing:</b> ${d['12'].blessing}</p><p><b>Ley Line Disorder:</b> ${d['12'].disorder}</p><p><b>Monster Waves:</b> ${d['12'].waves_1st} & ${d['12'].waves_2nd}</p><p><b>Unbiased Reaction Strategy:</b> ${d['12'].strategy}</p><p><b>Algorithmic Party Multiplier:</b> ${d['12'].resonance}</p>`;
-        }
-
-        async function openTheater() {
-            let r = await fetch('/api/theater/current');
-            if(r.status === 403) { showSecurity(); return; }
-            let d = await r.json();
-            document.getElementById('abyss-panel').style.display = 'none';
-            document.getElementById('build-panel').style.display = 'none';
-            let panel = document.getElementById('theater-panel'); panel.style.display = 'block';
-            document.getElementById('theater-content').innerHTML = `<p><b>Element Restrictions:</b> ${d.restrictions.join(' / ')}</p><p><b>Opening Cast Node:</b> ${d.opening_cast.join(', ')}</p><p><b>Special Cross-Cloud Guest Stars:</b> ${d.special_guests.join(', ')}</p><p><b>Dynamic Performance Buffs:</b> ${d.buffs}</p>`;
+            document.getElementById('abyss-content').innerHTML = `<h3>Active Core Node Cluster Status: ${d['12'].node_id}</h3><p><b>Cluster Array Capacity:</b> ${d['12'].capacity}</p><p><b>Active Thread Handshakes:</b> ${d['12'].active_connections}</p><p><b>Current Infrastructure Load:</b> ${d['12'].load_factor}</p><p><b>Multi-AI Orchestrator Nodes:</b> ${d['12'].assigned_ai}</p><p><b>Link Status:</b> ${d['12'].cross_link}</p>`;
         }
 
         async function authenticateAdmin() {
@@ -101,10 +90,9 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({secret_token: token})
             });
-            let res = await r.json();
             let statusDiv = document.getElementById('admin-status');
-            if(r.status === 200) { statusDiv.style.color = '#10b981'; statusDiv.innerText = "Immunity Enabled! Firewall Cleared."; }
-            else { statusDiv.style.color = '#ef4444'; statusDiv.innerText = "Invalid Cryptographic Signature Key."; }
+            if(r.status === 200) { statusDiv.style.color = '#10b981'; statusDiv.innerText = "System Authorization Confirmed. Whitelist Profile Active."; }
+            else { statusDiv.style.color = '#ef4444'; statusDiv.innerText = "Security Signature Mismatch. Access Denied."; }
         }
 
         function showSecurity() {
