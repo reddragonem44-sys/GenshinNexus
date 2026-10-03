@@ -20,8 +20,21 @@ const characterGrid = document.getElementById("characterGrid");
 const archiveStatus = document.getElementById("archiveStatus");
 const archiveCount = document.getElementById("archiveCount");
 const bannersPanel = document.getElementById("bannersPanel");
+const theaterPanel = document.getElementById("theaterPanel");
 const abyssPanel = document.getElementById("abyssPanel");
 const abyssScrim = document.getElementById("abyssScrim");
+const abyssFloorSelector = document.getElementById("abyssFloorSelector");
+const abyssDataStatus = document.getElementById("abyssDataStatus");
+const abyssTeamGrid = document.getElementById("abyssTeamGrid");
+const theaterSeason = document.getElementById("theaterSeason");
+const theaterStatus = document.getElementById("theaterStatus");
+const theaterLocks = document.getElementById("theaterLocks");
+const theaterOpeningCast = document.getElementById("theaterOpeningCast");
+const theaterGuests = document.getElementById("theaterGuests");
+const theaterActs = document.getElementById("theaterActs");
+const velocityAlert = document.getElementById("velocityAlert");
+const velocityChallengeLink = document.getElementById("velocityChallengeLink");
+const velocityAlertClose = document.getElementById("velocityAlertClose");
 const bannerPhases = document.getElementById("bannerPhases");
 const bannerCountdown = document.getElementById("bannerCountdown");
 const bannerCountdownLabel = document.getElementById("bannerCountdownLabel");
@@ -31,7 +44,6 @@ const abyssBlessingName = document.getElementById("abyssBlessingName");
 const abyssBlessingText = document.getElementById("abyssBlessingText");
 const leylineGrid = document.getElementById("leylineGrid");
 const chamberGrid = document.getElementById("chamberGrid");
-const syncLabel = document.getElementById("syncLabel");
 
 const generatePlanBtn = document.getElementById("generatePlanBtn");
 const summaryTitle = document.getElementById("summaryTitle");
@@ -53,6 +65,7 @@ const CATEGORY_DETAILS = {
   weapons: ["Weapons", "Cloud-indexed weapon records. ", "Weapon details are served by JMP Blue."],
   artifacts: ["Artifacts", "Cloud-indexed artifact records. ", "Artifact details are served by JMP Blue."],
   materials: ["Materials", "Cloud-indexed material records. ", "Material details are served by JMP Blue."],
+  enemies: ["Enemies", "Live enemy catalog records.", "Enemy portraits are served by JMP Blue."],
   food: ["Food", "Cloud-indexed food records. ", "Food details are served by JMP Blue."],
   builds: ["Featured Builds", "Open the ascension and build planner below."],
   teams: ["Teams", "Team planning shortcut. Select a character to start a build."],
@@ -62,7 +75,7 @@ const CATEGORY_DETAILS = {
   banners: ["Banners", "Browse event banner history."],
   leaderboard: ["Leaderboard", "Community leaderboard directory."],
   "spiral-abyss": ["Spiral Abyss", "Open the Spiral Abyss guide."],
-  "imaginarium-theater": ["Imaginarium Theater", "Open the Imaginarium Theater guide."],
+  "imaginarium-theater": ["Imaginarium Theater", "Open the current Theater season."],
   onslaught: ["Onslaught", "Open the combat challenge guide."],
 };
 
@@ -77,6 +90,13 @@ let catalogCategory = "characters";
 let bannerTransitionEpoch = null;
 let bannerTransitionReloaded = false;
 let abyssCloseTimeout = null;
+let abyssFloors = [];
+let abyssTeams = [];
+
+const TEAM_PORTRAIT_SLUGS = {
+  "Kamisato Ayaka": "ayaka",
+  "Raiden Shogun": "raiden",
+};
 
 function characterSlug(name) {
   return name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[()]/g, " ").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -92,9 +112,32 @@ async function fetchJson(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.detail || `Request failed (${response.status}).`);
+    if (response.status === 429 || response.status === 403) {
+      showVelocityAlert(data.challenge_url);
+    }
+    const error = new Error(data.detail || `Request failed (${response.status}).`);
+    error.status = response.status;
+    error.challengeUrl = data.challenge_url;
+    throw error;
   }
   return data;
+}
+
+function showVelocityAlert(challengeUrl) {
+  if (!velocityAlert) return;
+  if (challengeUrl && challengeUrl.startsWith("/security/challenge/")) {
+    velocityChallengeLink.href = challengeUrl;
+    velocityChallengeLink.classList.remove("hidden");
+  } else {
+    velocityChallengeLink?.classList.add("hidden");
+  }
+  velocityAlert.classList.add("is-visible");
+  velocityAlert.setAttribute("aria-hidden", "false");
+}
+
+function hideVelocityAlert() {
+  velocityAlert?.classList.remove("is-visible");
+  velocityAlert?.setAttribute("aria-hidden", "true");
 }
 
 async function getCharacterMappings() {
@@ -279,6 +322,7 @@ async function openBannerPanel() {
   if (!bannersPanel) return;
   closeAbyssDrawer();
   catalogPanel?.classList.add("hidden");
+  theaterPanel?.classList.add("hidden");
   bannersPanel.classList.remove("hidden");
   bannerPhases.replaceChildren();
   appendTextElement(bannerPhases, "p", "catalog-status", "Loading live banner schedule…");
@@ -299,10 +343,78 @@ async function openBannerPanel() {
   }
 }
 
+function appendTheaterCast(container, names) {
+  container.replaceChildren();
+  names.forEach((entry) => {
+    const character = typeof entry === "string" ? { name: entry } : entry;
+    const chip = document.createElement("span");
+    chip.className = "theater-cast-chip";
+    const image = document.createElement("img");
+    image.alt = "";
+    image.loading = "lazy";
+    image.src = character.icon_url || `https://genshin.jmp.blue/characters/${character.slug || characterSlug(character.name)}/icon`;
+    image.onerror = () => image.remove();
+    appendTextElement(chip, "span", "", character.name || "Unknown");
+    chip.prepend(image);
+    container.appendChild(chip);
+  });
+}
+
+function renderTheater(data) {
+  theaterSeason.textContent = data.season || data.season_name || "Current Season";
+  theaterStatus.textContent = data.updated_at ? `Feed updated ${new Date(data.updated_at).toLocaleString()}` : "Current data from configured season feed";
+  theaterLocks.replaceChildren();
+  (data.active_element_locks || data.active_elements || []).forEach((element) => {
+    appendTextElement(theaterLocks, "span", "theater-lock", element.name || element);
+  });
+  appendTheaterCast(theaterOpeningCast, data.opening_cast || []);
+  appendTheaterCast(theaterGuests, data.special_guest_stars || []);
+  theaterActs.replaceChildren();
+  (data.act_buffs || []).forEach((buff, index) => {
+    const card = document.createElement("article");
+    card.className = "theater-act";
+    appendTextElement(card, "h3", "", `${buff.act || buff.number || index + 1} · ${buff.name || "Act effect"}`);
+    appendTextElement(card, "p", "", buff.description || buff.effect || "Season modifier");
+    theaterActs.appendChild(card);
+  });
+}
+
+async function openTheaterPanel() {
+  closeAbyssDrawer();
+  catalogPanel?.classList.add("hidden");
+  bannersPanel?.classList.add("hidden");
+  theaterPanel?.classList.remove("hidden");
+  theaterStatus.textContent = "Connecting to the season feed…";
+  try {
+    renderTheater(await fetchJson("/api/theater/current"));
+  } catch (error) {
+    theaterStatus.textContent = error.message;
+    theaterSeason.textContent = "Season feed unavailable";
+  }
+}
+
 function renderAbyss(data) {
   abyssCycle.textContent = `${data.cycle} · Floor ${data.floor}`;
   abyssBlessingName.textContent = data.blessing.name;
   abyssBlessingText.textContent = data.blessing.description;
+  abyssDataStatus.textContent = data.data_status || "Rotation data";
+  abyssFloorSelector.replaceChildren();
+  abyssFloors.forEach((floor) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "abyss-floor-button";
+    button.setAttribute("aria-pressed", String(floor.floor === data.floor));
+    button.setAttribute("aria-label", `Floor ${floor.floor}: ${floor.label || "tactical layout"}`);
+    const image = document.createElement("img");
+    image.src = floor.layout_image_url;
+    image.alt = "";
+    image.loading = "lazy";
+    image.onerror = () => image.remove();
+    appendTextElement(button, "span", "", String(floor.floor).padStart(2, "0"));
+    button.prepend(image);
+    button.addEventListener("click", () => renderAbyss(floor));
+    abyssFloorSelector.appendChild(button);
+  });
   leylineGrid.replaceChildren();
   data.halves.forEach((half) => {
     const card = document.createElement("article");
@@ -317,19 +429,39 @@ function renderAbyss(data) {
   });
 
   chamberGrid.replaceChildren();
+  const enemyImages = new Map((data.enemy_assets || []).map((enemy) => [enemy.name, enemy.image_url]));
   data.chambers.forEach((chamber) => {
     const card = document.createElement("article");
     card.className = "chamber-card";
     appendTextElement(card, "h3", "", `Chamber ${chamber.number}`);
-    appendTextElement(card, "div", "chamber-half", "");
-    const halves = card.querySelectorAll(".chamber-half");
-    appendTextElement(halves[0], "strong", "", "First Half");
-    appendTextElement(halves[0], "p", "", chamber.first_half_enemies.join(" · "));
-    const second = document.createElement("div");
-    second.className = "chamber-half";
-    appendTextElement(second, "strong", "", "Second Half");
-    appendTextElement(second, "p", "", chamber.second_half_enemies.join(" · "));
-    card.appendChild(second);
+    [["First Half", chamber.first_half_enemies], ["Second Half", chamber.second_half_enemies]].forEach(([label, enemies]) => {
+      const half = document.createElement("div");
+      half.className = "chamber-half";
+      appendTextElement(half, "strong", "", label);
+      const enemyList = document.createElement("div");
+      enemyList.className = "enemy-list";
+      enemies.forEach((name) => {
+        const enemy = document.createElement("div");
+        enemy.className = "enemy-entry";
+        const icon = document.createElement("span");
+        icon.className = "enemy-icon";
+        appendTextElement(icon, "span", "enemy-fallback", name.slice(0, 1));
+        const imageUrl = enemyImages.get(name);
+        if (imageUrl) {
+          const image = document.createElement("img");
+          image.src = imageUrl;
+          image.alt = "";
+          image.loading = "lazy";
+          image.onerror = () => image.remove();
+          icon.prepend(image);
+        }
+        appendTextElement(enemy, "span", "enemy-name", name);
+        enemy.prepend(icon);
+        enemyList.appendChild(enemy);
+      });
+      half.appendChild(enemyList);
+      card.appendChild(half);
+    });
     appendTextElement(card, "p", "chamber-strategy", chamber.strategy);
     const recommended = document.createElement("div");
     recommended.className = "recommended-row";
@@ -342,6 +474,39 @@ function renderAbyss(data) {
       card.appendChild(teamLine);
     });
     chamberGrid.appendChild(card);
+  });
+  renderTeamRecommendations(data.teams || abyssTeams);
+}
+
+function renderTeamRecommendations(teams) {
+  abyssTeamGrid.replaceChildren();
+  teams.forEach((team) => {
+    const card = document.createElement("article");
+    card.className = "abyss-team-card";
+    appendTextElement(card, "h4", "", team.name || `Floor ${team.floor} recommendation`);
+    appendTextElement(card, "p", "team-best-for", (team.matched_elements || []).join(" · ") || "Element-match recommendation");
+    const members = document.createElement("div");
+    members.className = "team-members";
+    (team.members || []).forEach((memberData) => {
+      const name = typeof memberData === "string" ? memberData : memberData.name;
+      const member = document.createElement("span");
+      member.className = "team-member";
+      const image = document.createElement("img");
+      image.alt = "";
+      image.loading = "lazy";
+      const slug = TEAM_PORTRAIT_SLUGS[name] || memberData.slug || characterSlug(name);
+      image.src = memberData.icon_url || `https://genshin.jmp.blue/characters/${slug}/icon`;
+      image.onerror = () => image.remove();
+      appendTextElement(member, "span", "", name);
+      member.prepend(image);
+      members.appendChild(member);
+    });
+    card.appendChild(members);
+    (team.resonances || []).forEach((resonance) => {
+      appendTextElement(card, "p", "team-description", `${resonance.element} resonance · ${resonance.effect}`);
+    });
+    if (team.reaction_chain) appendTextElement(card, "p", "team-description", team.reaction_chain);
+    abyssTeamGrid.appendChild(card);
   });
 }
 
@@ -359,26 +524,25 @@ async function openAbyssPanel() {
   if (abyssCloseTimeout) window.clearTimeout(abyssCloseTimeout);
   catalogPanel?.classList.add("hidden");
   bannersPanel?.classList.add("hidden");
+  theaterPanel?.classList.add("hidden");
   abyssPanel.classList.remove("hidden");
   abyssScrim?.classList.remove("hidden");
-  requestAnimationFrame(() => abyssPanel.classList.add("is-open"));
+  abyssPanel.classList.add("is-open");
   try {
-    renderAbyss(await fetchJson("/api/abyss/floor12"));
+    const matrix = await fetchJson("/api/abyss");
+    abyssFloors = matrix.floors || [];
+    abyssTeams = matrix.teams || [];
+    const activeFloor = abyssFloors.find((floor) => floor.floor === 12) || abyssFloors[0];
+    if (activeFloor) renderAbyss(activeFloor);
   } catch (error) {
-    abyssCycle.textContent = error.message;
-  }
-}
-
-async function pollSyncState() {
-  if (!syncLabel) return;
-  try {
-    const state = await fetchJson("/api/sync-archive");
-    const timeLabel = state.last_synced_at ? new Date(state.last_synced_at).toLocaleTimeString() : "awaiting first sync";
-    syncLabel.textContent = `${state.status.toUpperCase()} · ${timeLabel}`;
-    syncLabel.title = `Background sync interval: ${state.interval_seconds || 60} seconds`;
-  } catch (error) {
-    syncLabel.textContent = "SYNC DEGRADED";
-    syncLabel.title = error.message;
+    abyssCycle.textContent = "Spiral Abyss";
+    abyssDataStatus.textContent = error.message;
+    abyssBlessingName.textContent = "Rotation data unavailable";
+    abyssBlessingText.textContent = "Connect an Abyss feed to load current floors and tactical recommendations.";
+    abyssFloorSelector.replaceChildren();
+    leylineGrid.replaceChildren();
+    chamberGrid.replaceChildren();
+    abyssTeamGrid.replaceChildren();
   }
 }
 
@@ -405,11 +569,17 @@ async function openCategory(category) {
     await openAbyssPanel();
     return;
   }
+  if (category === "imaginarium-theater") {
+    await openTheaterPanel();
+    return;
+  }
   if (!catalogPanel) {
     document.getElementById("profile")?.scrollIntoView({ behavior: "smooth" });
     return;
   }
   closeAbyssDrawer();
+  bannersPanel?.classList.add("hidden");
+  theaterPanel?.classList.add("hidden");
   catalogCategory = category;
   bannersPanel?.classList.add("hidden");
   const details = CATEGORY_DETAILS[category] || [category, "Browse the Teyvat portal."];
@@ -447,10 +617,12 @@ function setupPortal() {
   document.querySelectorAll("[data-close-panel]").forEach((button) => {
     button.addEventListener("click", () => {
       bannersPanel?.classList.add("hidden");
+      theaterPanel?.classList.add("hidden");
       closeAbyssDrawer();
     });
   });
   abyssScrim?.addEventListener("click", closeAbyssDrawer);
+  velocityAlertClose?.addEventListener("click", hideVelocityAlert);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeAbyssDrawer();
   });
@@ -480,8 +652,6 @@ function setupPortal() {
     }
   });
 
-  pollSyncState();
-  window.setInterval(pollSyncState, 10000);
   window.setInterval(updateBannerCountdown, 1000);
 }
 

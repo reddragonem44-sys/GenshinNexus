@@ -1,138 +1,124 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="A cloud-connected Genshin Impact portal for characters, builds, and Teyvat resources." />
-    <title>GenshinNexus | Cloud Companion</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/style.css" />
-  </head>
-  <body data-page="portal">
-    <div class="portal-shell">
-      <header class="portal-header">
-        <a class="brand" href="/" aria-label="Teyvat Portal home">
-          <span class="brand-symbol">✦</span>
-          <span><small>CLOUD COMPANION</small><strong>GenshinNexus</strong></span>
-        </a>
-        <nav class="spotlight-links" aria-label="Spotlight">
-          <a href="#portal-grid" data-category="builds">Featured Builds</a>
-          <a href="#portal-grid" data-category="characters">Character Guides</a>
-          <a href="#portal-grid" data-category="tierlist">Live Tier List</a>
-        </nav>
-        <a class="archive-link" href="/archive">Character Archive <span aria-hidden="true">↗</span></a>
-      </header>
+<head>
+    <meta charset="UTF-8">
+    <title>GenshinNexus Cloud Portal</title>
+    <style>
+        body { background-color: #0b0f19; color: #f3f4f6; font-family: sans-serif; margin: 0; padding: 20px; }
+        .grid-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; max-width: 900px; margin: 0 auto; }
+        .tile { background-color: #111827; border: 1px solid #d97706; padding: 20px; border-radius: 8px; cursor: pointer; text-align: center; transition: transform 0.2s; font-weight: bold; }
+        .tile:hover { transform: translateY(-3px); box-shadow: 0 4px 15px rgba(217, 119, 6, 0.4); }
+        select, option { background-color: #111827 !important; color: #f3f4f6 !important; border: 1px solid #d97706; padding: 12px; border-radius: 4px; width: 100%; max-width: 350px; font-size: 16px; display: block; margin: 0 auto; }
+        .panel { display: none; background-color: #111827; border: 2px solid #d97706; border-radius: 8px; padding: 25px; max-width: 700px; margin: 25px auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #security-card { display: none; background: #111827; border: 2px solid #ef4444; border-radius: 8px; padding: 30px; text-align: center; max-width: 400px; margin: 40px auto; }
+        .btn { background-color: #d97706; color: #111827; font-weight: bold; border: none; padding: 10px 25px; border-radius: 4px; cursor: pointer; margin-top: 15px; }
+        .admin-console { max-width: 400px; margin: 30px auto; text-align: center; padding: 15px; background: #161e2e; border-radius: 6px; border: 1px dashed #d97706; }
+        .admin-input { background: #0b0f19; border: 1px solid #d97706; color: #f3f4f6; padding: 8px; border-radius: 4px; width: 60%; }
+        .build-card { background: #1c2541; padding: 15px; border-radius: 6px; border-left: 4px solid #d97706; margin-top: 15px; }
+    </style>
+</head>
+<body>
+    <div id="main-ui">
+        <h1 style="text-align: center; color: #d97706; letter-spacing: 2px;">🌌 GENSHINNEXUS OMNI-AI PORTAL</h1>
+        
+        <div style="margin-bottom: 30px;">
+            <select id="char-select" onchange="loadCharacterBuild()">
+                <option value="">-- [Cloud Sync] Select Character Database --</option>
+                <option value="vodyanitsa">Vodyanitsa (Version 7.1 New!)</option>
+                <option value="vesna">Vesna (Version 7.1 New!)</option>
+                <option value="skirk">Skirk (Upcoming Master Rerun)</option>
+                <option value="raiden">Raiden Shogun (Electro Core)</option>
+            </select>
+        </div>
 
-      <main>
-        <section class="welcome-row">
-          <div>
-            <p class="eyebrow">TEYVAT FIELD GUIDE <span class="status-dot"></span> CLOUD INDEX</p>
-            <h1>Your next adventure, <em>at a glance.</em></h1>
-          </div>
-          <div class="welcome-meta"><span>DATA VIA JMP.BLUE</span><span>24H EDGE CACHE</span><span id="syncLabel">SYNC STARTING</span></div>
-        </section>
+        <div id="build-panel" class="panel"><h2>Omni-AI Equipment Profile</h2><div id="build-content"></div></div>
 
-        <section class="portal-section" aria-labelledby="portalHeading">
-          <div class="section-heading">
-            <div><p class="eyebrow">EXPLORE TEYVAT</p><h2 id="portalHeading">Portal index</h2></div>
-            <a class="text-link" href="/archive">Browse full character archive <span aria-hidden="true">→</span></a>
-          </div>
-          <div class="portal-grid" id="portal-grid">
-            <button class="portal-tile tile-cyan" data-category="characters" type="button"><span class="tile-icon">✧</span><span class="tile-title">Characters</span><small>Character archive</small></button>
-            <button class="portal-tile tile-gold" data-category="weapons" type="button"><span class="tile-icon">⚔</span><span class="tile-title">Weapons</span><small>Arms & ascension</small></button>
-            <button class="portal-tile tile-rose" data-category="artifacts" type="button"><span class="tile-icon">◈</span><span class="tile-title">Artifacts</span><small>Sets & main stats</small></button>
-            <button class="portal-tile tile-green" data-category="builds" type="button"><span class="tile-icon">⌘</span><span class="tile-title">Builds</span><small>Build planner</small></button>
-            <button class="portal-tile tile-blue" data-category="teams" type="button"><span class="tile-icon">♧</span><span class="tile-title">Teams</span><small>Team directory</small></button>
-            <button class="portal-tile tile-violet" data-category="tierlist" type="button"><span class="tile-icon">▤</span><span class="tile-title">Tierlist</span><small>Meta index</small></button>
+        <div class="grid-container">
+            <div class="tile" onclick="openAbyss()">🏟️ Spiral Abyss (Floors 1-12)</div>
+            <div class="tile" onclick="openTheater()">🎭 Imaginarium Theater</div>
+            <div class="tile">⚔️ Live Weapon CDNs</div>
+            <div class="tile">🌸 Global Artifact Trees</div>
+            <div class="tile">📦 Materials Cache Math</div>
+            <div class="tile">⏳ Real-Time Banner Tickers</div>
+        </div>
 
-            <button class="portal-tile tile-rose" data-category="tcg" type="button"><span class="tile-icon">▧</span><span class="tile-title">TCG</span><small>Genius Invokation</small></button>
-            <button class="portal-tile tile-violet" data-category="tcg-best-decks" type="button"><span class="tile-icon">♜</span><span class="tile-title">TCG Best Decks</span><small>Deck library</small></button>
-            <button class="portal-tile tile-green" data-category="materials" type="button"><span class="tile-icon">❖</span><span class="tile-title">Materials</span><small>Gathering index</small></button>
-            <button class="portal-tile tile-gold" data-category="food" type="button"><span class="tile-icon">✿</span><span class="tile-title">Food</span><small>Recipes & effects</small></button>
-            <button class="portal-tile tile-blue" data-category="banners" type="button"><span class="tile-icon">旗</span><span class="tile-title">Banners</span><small>Event history</small></button>
-            <button class="portal-tile tile-cyan" data-category="leaderboard" type="button"><span class="tile-icon">♕</span><span class="tile-title">Leaderboard</span><small>Community ranks</small></button>
+        <div id="abyss-panel" class="panel"><h2>Spiral Abyss Tactical Command</h2><div id="abyss-content"></div></div>
+        <div id="theater-panel" class="panel"><h2>Imaginarium Theater Deployment</h2><div id="theater-content"></div></div>
 
-            <button class="portal-tile tile-violet" data-category="spiral-abyss" type="button"><span class="tile-icon">◉</span><span class="tile-title">Spiral Abyss</span><small>Floor 9–12</small></button>
-            <button class="portal-tile tile-cyan" data-category="imaginarium-theater" type="button"><span class="tile-icon">✺</span><span class="tile-title">Imaginarium Theater</span><small>Act & season guide</small></button>
-            <button class="portal-tile tile-rose" data-category="onslaught" type="button"><span class="tile-icon">➶</span><span class="tile-title">Onslaught</span><small>Combat challenge</small></button>
-          </div>
-        </section>
-
-        <section class="catalog-panel hidden" id="catalogPanel" aria-live="polite">
-          <div class="catalog-heading">
-            <div><p class="eyebrow">CLOUD CATALOG</p><h2 id="catalogTitle">Characters</h2><p id="catalogDescription">Search the live character index.</p></div>
-            <label class="search-box"><span aria-hidden="true">⌕</span><input id="catalogSearch" type="search" placeholder="Search the catalog" autocomplete="off" /></label>
-          </div>
-          <p class="catalog-status" id="catalogStatus" role="status"></p>
-          <div class="catalog-results" id="catalogResults"></div>
-        </section>
-
-        <section class="feature-panel hidden" id="bannersPanel" aria-live="polite">
-          <div class="feature-panel-heading">
-            <div><p class="eyebrow">VERSION 7.1 WISH SCHEDULE</p><h2>Event banners</h2></div>
-            <button class="panel-close" data-close-panel type="button" aria-label="Close banners">×</button>
-          </div>
-          <div class="banner-countdown-wrap"><span id="bannerCountdownLabel">Next transition</span><strong id="bannerCountdown">--d --h --m --s</strong><small id="bannerUpdated">Schedule loaded from portal data</small></div>
-          <div class="banner-phases" id="bannerPhases"></div>
-        </section>
-
-        <button class="drawer-scrim hidden" id="abyssScrim" type="button" aria-label="Close Spiral Abyss tactics"></button>
-        <aside class="feature-panel tactical-drawer hidden" id="abyssPanel" aria-live="polite" aria-label="Spiral Abyss Floor 12 tactics">
-          <div class="feature-panel-heading">
-            <div><p class="eyebrow">TACTICAL PORTAL · FLOOR 12</p><h2 id="abyssCycle">Spiral Abyss</h2></div>
-            <button class="panel-close" data-close-panel type="button" aria-label="Close Spiral Abyss">×</button>
-          </div>
-          <div class="abyss-blessing"><span>BLESSING OF THE ABYSSAL MOON</span><h3 id="abyssBlessingName">Loading blessing…</h3><p id="abyssBlessingText"></p></div>
-          <div class="leyline-grid" id="leylineGrid"></div>
-          <div class="chamber-grid" id="chamberGrid"></div>
-        </aside>
-
-        <section class="workspace-grid" id="profile">
-          <article class="profile-panel">
-            <div class="panel-heading"><div><p class="eyebrow">CHARACTER DOSSIER</p><h2>Build companion</h2></div><a class="text-link" href="/archive">Open archive →</a></div>
-            <label class="field-label" for="characterSelect">Active character</label>
-            <select id="characterSelect" aria-label="Select a character"><option value="">Loading cloud archive…</option></select>
-            <div class="character-card" id="characterCard" aria-live="polite">
-              <div class="character-art"><img id="characterImage" alt="" /><span id="imageFallback">✦</span></div>
-              <div class="character-copy">
-                <p class="eyebrow" id="characterRegion">TEYVAT</p>
-                <h3 id="characterName">Choose a character</h3>
-                <p class="character-description" id="characterDescription">Character data and images load from the cloud as needed.</p>
-                <div class="character-tags"><span id="elementValue">—</span><span id="weaponValue">—</span><span id="rarityValue">—</span></div>
-              </div>
-            </div>
-            <p class="loading-note hidden" id="profileLoading" role="status">Paimon is gathering data...</p>
-            <div class="profile-materials" id="profileMaterials"></div>
-          </article>
-
-          <article class="planner-panel">
-            <div class="panel-heading"><div><p class="eyebrow">ASCENSION TRACKER</p><h2>Plan a level-up</h2></div><span class="cloud-mark">CLOUD DATA</span></div>
-            <div class="planner-fields">
-              <label class="field-label" for="currentLevel">Current level<input id="currentLevel" type="number" min="1" max="89" value="1" /></label>
-              <label class="field-label" for="targetLevel">Target level<input id="targetLevel" type="number" min="2" max="90" value="90" /></label>
-            </div>
-            <div class="talent-fields">
-              <label class="field-label" for="normalTalent">Normal<input id="normalTalent" type="number" min="1" max="10" value="1" /></label>
-              <label class="field-label" for="skillTalent">Skill<input id="skillTalent" type="number" min="1" max="10" value="1" /></label>
-              <label class="field-label" for="burstTalent">Burst<input id="burstTalent" type="number" min="1" max="10" value="1" /></label>
-            </div>
-            <button id="generatePlanBtn" class="action-button" type="button">Calculate materials <span aria-hidden="true">→</span></button>
-            <div class="plan-summary" aria-live="polite"><h3 id="summaryTitle">Ready when you are</h3><p id="summaryText">Choose a character and calculate its cloud-sourced ascension costs.</p></div>
-            <div class="material-list" id="materialList"></div>
-          </article>
-        </section>
-
-        <section class="share-strip" id="shortener">
-          <div><p class="eyebrow">SHARE A ROUTE</p><h2>Shorten a link</h2></div>
-          <form id="shortenForm" class="share-form" novalidate><input id="planUrlInput" type="url" placeholder="https://example.com/build" aria-label="Long URL" /><button class="action-button" type="submit">Create short link <span aria-hidden="true">↗</span></button></form>
-          <div class="share-output hidden" id="shortLinkCard"><a id="shortLink" href="#" target="_blank" rel="noopener noreferrer"></a><button id="copyShareBtn" class="copy-button" type="button">Copy</button></div>
-          <p class="error-message" id="shareError" role="alert"></p>
-        </section>
-      </main>
-      <footer class="portal-footer"><span>GENSHINNEXUS</span><span>Cloud indexed · Local cache expires after 24 hours</span></footer>
+        <div class="admin-console">
+            <h4 style="margin: 0 0 10px 0; color: #d97706;">🔒 Secure Admin Terminal</h4>
+            <input type="password" id="admin-pass" class="admin-input" placeholder="Enter Token Command...">
+            <button class="btn" style="margin-top:0; padding: 8px 15px;" onclick="authenticateAdmin()">Verify</button>
+            <div id="admin-status" style="font-size:12px; margin-top:8px; color:#9ca3af;"></div>
+        </div>
     </div>
-    <script src="/static/script.js"></script>
-  </body>
+
+    <div id="security-card">
+        <h2 style="color: #ef4444;">🚨 Anti-Velocity Firewall</h2>
+        <p>Dynamic verification challenge active. Please wait for the loop parameters to cycle.</p>
+        <div id="timer" style="font-size: 28px; font-weight: bold; margin: 15px 0; color: #ef4444;">30</div>
+        <button class="btn" onclick="clearSecurity()">Clear Security Gate</button>
+    </div>
+
+    <script>
+        async function loadCharacterBuild() {
+            let slug = document.getElementById('char-select').value;
+            if(!slug) return;
+            let r = await fetch('/api/characters/all-builds');
+            if(r.status === 403) { showSecurity(); return; }
+            let d = await r.json();
+            let c = d[slug];
+            document.getElementById('abyss-panel').style.display = 'none';
+            document.getElementById('theater-panel').style.display = 'none';
+            let panel = document.getElementById('build-panel'); panel.style.display = 'block';
+            document.getElementById('build-content').innerHTML = `<div class="build-card"><h3>${slug.toUpperCase()} (${c.vision} - ${c.rarity})</h3><p><b>Best-In-Slot Artifacts:</b> ${c.artifact_bis}</p><p><b>Main Stat Targets:</b> ${c.main_stats}</p><p><b>Substat Priority:</b> ${c.sub_priorities}</p><p><b>Recommended Cloud Weaponry:</b> ${c.weapon_bis}</p></div>`;
+        }
+
+        async function openAbyss() {
+            let r = await fetch('/api/abyss/all-floors');
+            if(r.status === 403) { showSecurity(); return; }
+            let d = await r.json();
+            document.getElementById('theater-panel').style.display = 'none';
+            document.getElementById('build-panel').style.display = 'none';
+            let panel = document.getElementById('abyss-panel'); panel.style.display = 'block';
+            document.getElementById('abyss-content').innerHTML = `<h3>Active Floor 12 Framework</h3><p><b>Abyssal Blessing:</b> ${d['12'].blessing}</p><p><b>Ley Line Disorder:</b> ${d['12'].disorder}</p><p><b>Monster Waves:</b> ${d['12'].waves_1st} & ${d['12'].waves_2nd}</p><p><b>Unbiased Reaction Strategy:</b> ${d['12'].strategy}</p><p><b>Algorithmic Party Multiplier:</b> ${d['12'].resonance}</p>`;
+        }
+
+        async function openTheater() {
+            let r = await fetch('/api/theater/current');
+            if(r.status === 403) { showSecurity(); return; }
+            let d = await r.json();
+            document.getElementById('abyss-panel').style.display = 'none';
+            document.getElementById('build-panel').style.display = 'none';
+            let panel = document.getElementById('theater-panel'); panel.style.display = 'block';
+            document.getElementById('theater-content').innerHTML = `<p><b>Element Restrictions:</b> ${d.restrictions.join(' / ')}</p><p><b>Opening Cast Node:</b> ${d.opening_cast.join(', ')}</p><p><b>Special Cross-Cloud Guest Stars:</b> ${d.special_guests.join(', ')}</p><p><b>Dynamic Performance Buffs:</b> ${d.buffs}</p>`;
+        }
+
+        async function authenticateAdmin() {
+            let token = document.getElementById('admin-pass').value;
+            let r = await fetch('/api/admin/authorize-vault', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({secret_token: token})
+            });
+            let res = await r.json();
+            let statusDiv = document.getElementById('admin-status');
+            if(r.status === 200) { statusDiv.style.color = '#10b981'; statusDiv.innerText = "Immunity Enabled! Firewall Cleared."; }
+            else { statusDiv.style.color = '#ef4444'; statusDiv.innerText = "Invalid Cryptographic Signature Key."; }
+        }
+
+        function showSecurity() {
+            document.getElementById('main-ui').style.display = 'none';
+            document.getElementById('security-card').style.display = 'block';
+            let t = 30; let i = setInterval(() => { t--; document.getElementById('timer').innerText = t; if(t<=0) clearInterval(i); }, 1000);
+        }
+
+        function clearSecurity() {
+            if(parseInt(document.getElementById('timer').innerText) <= 0) {
+                document.getElementById('security-card').style.display = 'none';
+                document.getElementById('main-ui').style.display = 'block';
+            }
+        }
+    </script>
+</body>
 </html>

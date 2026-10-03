@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-import asyncio
 import ipaddress
 import json
 import os
 import re
+import secrets
 import sqlite3
+import threading
 import time
 import unicodedata
-from contextlib import asynccontextmanager, suppress
+from collections import deque
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,10 +19,10 @@ from urllib.parse import unquote, urlsplit
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
@@ -31,16 +33,6 @@ ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 SHORT_URL_PATTERN = re.compile(r"^https?://[^\s<>\"']+$", re.IGNORECASE)
 CHARACTER_API_URL = "https://genshin.jmp.blue/characters"
 API_BASE_URL = "https://genshin.jmp.blue"
-CACHE_TTL_SECONDS = 24 * 60 * 60
-SYNC_INTERVAL_SECONDS = 60
-CUSTOM_CHARACTER_NAMES = {
-    "Traveler (Anemo)", "Vodyanitsa", "Vesna", "Skirk", "Escoffier", "Chasca", "Mualani",
-    "Ororon", "Xilonen", "Kachina", "Sandrone",
-}
-CHARACTER_ELEMENTS = {
-    "Chasca": "Anemo", "Escoffier": "Cryo", "Kachina": "Geo", "Mualani": "Hydro",
-    "Ororon": "Electro", "Skirk": "Cryo", "Xilonen": "Geo",
-}
 API_SLUG_ALIASES = {
     "arataki-itto": "itto",
     "kamisato-ayaka": "ayaka",
@@ -73,10 +65,23 @@ CLOUD_CATALOG_PATHS = {
     "artifacts": "artifacts",
     "materials": "materials",
     "food": "foods",
+    "enemies": "enemies",
 }
-GITHUB_TREE_PATH = "repos/genshindev/api/git/trees/mistress?recursive=1"
-GOOGLE_CSE_API_KEY = os.getenv("GOOGLE_CSE_API_KEY")
-GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
+
+
+def configured_feed(name: str) -> str | None:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return None
+    parsed = urlsplit(value)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+        raise ValueError(f"{name} must be an absolute HTTPS URL without credentials or fragments.")
+    return value
+
+
+ABYSS_DATA_URL = configured_feed("ABYSS_DATA_URL")
+THEATER_DATA_URL = configured_feed("THEATER_DATA_URL")
+BANNER_DATA_URL = configured_feed("BANNER_DATA_URL")
 def parse_cors_allowed_origins(value: str) -> tuple[str, ...]:
     origins = []
     for raw_origin in value.split(","):
@@ -180,85 +185,121 @@ class SecurityHeadersMiddleware:
 
         await self.app(scope, receive, send_secure)
 
-BANNER_PHASES = [
-    {
-        "id": "version-7-1-phase-1",
-        "label": "Version 7.1 · Phase I",
-        "status": "active",
-        "starts_at": "2026-09-23T00:00:00Z",
-        "ends_at": "2026-10-13T00:00:00Z",
-        "characters": ["Vodyanitsa", "Vesna"],
-        "featured_four_stars": ["Faruzan", "Chongyun", "Diona"],
-        "weapons": ["Beyond the Chrysalis", "Hymn of the Maelstrom"],
-    },
-    {
-        "id": "version-7-1-phase-2",
-        "label": "Version 7.1 · Phase II",
-        "status": "upcoming",
-        "starts_at": "2026-10-13T00:00:00Z",
-        "ends_at": "2026-11-03T00:00:00Z",
-        "characters": ["Skirk", "Escoffier"],
-        "featured_four_stars": [],
-        "weapons": ["Azurelight", "Symphonist of Scents"],
-    },
-]
-
-ABYSS_FLOOR_12 = {
-    "cycle": "Version 7.1 · October 2026",
-    "floor": 12,
-    "blessing": {
-        "name": "Ice-Surging Moon",
-        "description": "Triggering Swirl or Stellar Swirl deals True DMG at the opponent's location once every 4 seconds.",
-        "cooldown_seconds": 4,
-    },
-    "halves": [
-        {
-            "name": "First Half",
-            "disorders": ["+200% Swirl DMG", "+75% Stellar Swirl DMG"],
-            "recommended_elements": ["Anemo"],
-        },
-        {
-            "name": "Second Half",
-            "disorders": ["+200% Electro-Charged DMG", "+75% Lunar-Charged DMG"],
-            "recommended_elements": ["Electro", "Hydro"],
-        },
-    ],
-    "chambers": [
-        {
-            "number": 1,
-            "first_half_enemies": ["Bandersnatch", "Wilderness Exiles"],
-            "second_half_enemies": ["Raskolnikov"],
-            "strategy": "Bring Anemo crowd control to group targets and capitalize on the Swirl buffs.",
-            "recommended_elements": ["Anemo"],
-            "recommended_teams": {
-                "first_half": ["Venti", "Kazuha", "Furina", "Bennett"],
-                "second_half": ["Raiden Shogun", "Yelan", "Xingqiu", "Sucrose"],
-            },
-        },
-        {
-            "number": 2,
-            "first_half_enemies": ["Immortal Constructs"],
-            "second_half_enemies": ["Whisperer"],
-            "strategy": "Use strong Electro and Hydro application to maintain Electro-Charged control.",
-            "recommended_elements": ["Electro", "Hydro"],
-            "recommended_teams": {
-                "first_half": ["Fischl", "Beidou", "Xingqiu", "Sucrose"],
-                "second_half": ["Raiden Shogun", "Furina", "Yelan", "Kazuha"],
-            },
-        },
-        {
-            "number": 3,
-            "first_half_enemies": ["Churin"],
-            "second_half_enemies": ["Sigurd"],
-            "strategy": "Apply high-impact elemental breaks to interrupt defensive stances.",
-            "recommended_elements": ["Anemo", "Electro", "Hydro"],
-            "recommended_teams": {
-                "first_half": ["Kazuha", "Fischl", "Xingqiu", "Bennett"],
-                "second_half": ["Raiden Shogun", "Furina", "Sucrose", "Yelan"],
-            },
-        },
-    ],
+ELEMENT_RESONANCE = {
+    "Pyro": "2 Pyro: ATK +25%.",
+    "Hydro": "2 Hydro: Max HP +25%.",
+    "Anemo": "2 Anemo: Stamina consumption -15%, movement speed +10%, and skill cooldown -5%.",
 }
+VELOCITY_WINDOW_SECONDS = 1.0
+VELOCITY_REQUEST_LIMIT = 3
+CHALLENGE_WAIT_SECONDS = 30
+VELOCITY_LOCK = threading.Lock()
+CLIENT_REQUESTS: dict[str, deque[float]] = {}
+BANNED_CLIENTS: dict[str, dict[str, Any]] = {}
+
+
+def _flag_client_locked(client_ip: str) -> dict[str, Any]:
+    ban = BANNED_CLIENTS.get(client_ip)
+    if ban is None:
+        ban = {
+            "token": secrets.token_urlsafe(32),
+            "challenge_started_at": None,
+            "last_blocked_at": time.time(),
+        }
+        BANNED_CLIENTS[client_ip] = ban
+    return ban
+
+
+def flag_client(client_ip: str) -> dict[str, Any]:
+    with VELOCITY_LOCK:
+        return _flag_client_locked(client_ip).copy()
+
+
+def get_client_ip(scope: dict[str, Any]) -> str:
+    client = scope.get("client")
+    return str(client[0]) if client else "unknown"
+
+
+def challenge_url(ban: dict[str, Any]) -> str:
+    return f"/security/challenge/{ban['token']}"
+
+
+class VelocityBanMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        client_ip = get_client_ip(scope)
+        is_challenge = path.startswith("/security/challenge/")
+        is_counted = path.startswith(("/api/", "/characters/", "/shorten"))
+        now = time.monotonic()
+        triggered_now = False
+        reservation = None
+
+        if not is_challenge:
+            with VELOCITY_LOCK:
+                ban = BANNED_CLIENTS.get(client_ip)
+                if ban is not None and ban["challenge_started_at"] is not None:
+                    quiet_since = ban.get("last_blocked_at", ban["challenge_started_at"])
+                    if time.time() - quiet_since >= CHALLENGE_WAIT_SECONDS:
+                        BANNED_CLIENTS.pop(client_ip, None)
+                        CLIENT_REQUESTS.pop(client_ip, None)
+                        ban = None
+                if ban is None and is_counted:
+                    requests = CLIENT_REQUESTS.setdefault(client_ip, deque())
+                    while requests and now - requests[0] > VELOCITY_WINDOW_SECONDS:
+                        requests.popleft()
+                    if len(requests) >= VELOCITY_REQUEST_LIMIT:
+                        ban = _flag_client_locked(client_ip)
+                        triggered_now = True
+                    else:
+                        requests.append(now)
+                        reservation = now
+                    if len(CLIENT_REQUESTS) > 4096:
+                        stale_clients = [
+                            key for key, stamps in CLIENT_REQUESTS.items()
+                            if not stamps or now - stamps[-1] > 60
+                        ]
+                        for stale_ip in stale_clients:
+                            CLIENT_REQUESTS.pop(stale_ip, None)
+                if ban is not None:
+                    ban["challenge_started_at"] = time.time()
+                    ban["last_blocked_at"] = ban["challenge_started_at"]
+                    status_code = 429 if triggered_now else 403
+                    response_payload = {
+                        "detail": "Automated request defenses are active.",
+                        "challenge_url": challenge_url(ban),
+                    }
+                else:
+                    response_payload = None
+                    status_code = 0
+
+            if response_payload is not None:
+                response = JSONResponse(response_payload, status_code=status_code)
+                await response(scope, receive, send)
+                return
+
+        async def release_failed_request(message):
+            if (
+                reservation is not None
+                and message["type"] == "http.response.start"
+                and message["status"] >= 400
+            ):
+                with VELOCITY_LOCK:
+                    requests = CLIENT_REQUESTS.get(client_ip)
+                    if requests is not None:
+                        try:
+                            requests.remove(reservation)
+                        except ValueError:
+                            pass
+            await send(message)
+
+        await self.app(scope, receive, release_failed_request)
 
 
 def character_slug(display_name: str) -> str:
@@ -276,161 +317,30 @@ def display_name_for_slug(slug: str) -> str:
     return DISPLAY_NAME_OVERRIDES.get(slug, slug.replace("-", " ").title())
 
 
-def mock_character(display_name: str) -> dict[str, Any]:
-    is_traveler = display_name == "Traveler (Anemo)"
-    return {
-        "name": display_name,
-        "element": "Anemo" if is_traveler else CHARACTER_ELEMENTS.get(display_name, "Unknown"),
-        "weapon": "Sword" if is_traveler else "Unknown",
-        "rarity": 5,
-        "region": "Mondstadt" if is_traveler else "Unknown",
-        "role": "Traveler" if is_traveler else "Unreleased",
-        "specialty": "Local specialty (verify in-game)",
-        "boss_drop": "Ascension material (verify in-game)",
-        "talent_books": ["Talent material (verify in-game)"],
-        "artifact_sets": [
-            {
-                "name": "Flexible 2-piece set",
-                "main_stats": {"sands": "ATK%", "goblet": "Elemental DMG Bonus", "circlet": "CRIT Rate"},
-                "substats": ["CRIT Rate", "CRIT DMG", "ATK%", "Energy Recharge"],
-            }
-        ],
-    }
-
-BASE_CHARACTERS = [
-    {
-        "name": "Furina",
-        "element": "Hydro",
-        "weapon": "Sword",
-        "rarity": 5,
-        "region": "Fontaine",
-        "role": "Burst Support",
-        "specialty": "Fontainian Water",
-        "boss_drop": "Ring of Boreal Wolf",
-        "talent_books": ["Freedom", "Justice", "Elegance"],
-        "artifact_sets": [
-            {
-                "name": "Emblem of Severed Fate",
-                "main_stats": {"sands": "ATK%", "goblet": "Hydro DMG Bonus", "circlet": "CRIT Rate"},
-                "substats": ["ATK%", "CRIT Rate", "CRIT DMG", "Energy Recharge"]
-            },
-            {
-                "name": "Golden Troupe",
-                "main_stats": {"sands": "ATK%", "goblet": "Hydro DMG Bonus", "circlet": "CRIT DMG"},
-                "substats": ["ATK%", "CRIT Rate", "CRIT DMG", "Elemental Mastery"]
-            }
-        ]
-    },
-    {
-        "name": "Raiden Shogun",
-        "element": "Electro",
-        "weapon": "Polearm",
-        "rarity": 5,
-        "region": "Inazuma",
-        "role": "Burst DPS",
-        "specialty": "Storm Beads",
-        "boss_drop": "Storm Beads",
-        "talent_books": ["Light", "Transience", "Elegance"],
-        "artifact_sets": [
-            {
-                "name": "Emblem of Severed Fate",
-                "main_stats": {"sands": "Energy Recharge", "goblet": "Electro DMG Bonus", "circlet": "CRIT Rate"},
-                "substats": ["Energy Recharge", "ATK%", "CRIT Rate", "CRIT DMG"]
-            },
-            {
-                "name": "Gilded Dreams",
-                "main_stats": {"sands": "ATK%", "goblet": "Electro DMG Bonus", "circlet": "CRIT DMG"},
-                "substats": ["ATK%", "Energy Recharge", "CRIT Rate", "Elemental Mastery"]
-            }
-        ]
-    },
-    {
-        "name": "Hu Tao",
-        "element": "Pyro",
-        "weapon": "Polearm",
-        "rarity": 5,
-        "region": "Liyue",
-        "role": "Main DPS",
-        "specialty": "Silk Flower",
-        "boss_drop": "Juvenile Jade",
-        "talent_books": ["Diligence", "Guide to Gold", "Freedom"],
-        "artifact_sets": [
-            {
-                "name": "Crimson Witch of Flames",
-                "main_stats": {"sands": "ATK%", "goblet": "Pyro DMG Bonus", "circlet": "CRIT DMG"},
-                "substats": ["ATK%", "CRIT Rate", "CRIT DMG", "HP%"]
-            },
-            {
-                "name": "Shimenawa's Reminiscence",
-                "main_stats": {"sands": "ATK%", "goblet": "Pyro DMG Bonus", "circlet": "CRIT DMG"},
-                "substats": ["ATK%", "CRIT Rate", "CRIT DMG", "Energy Recharge"]
-            }
-        ]
-    },
-    {
-        "name": "Zhongli",
-        "element": "Geo",
-        "weapon": "Polearm",
-        "rarity": 5,
-        "region": "Liyue",
-        "role": "Shield Support",
-        "specialty": "Cor Lapis",
-        "boss_drop": "Basalt Pillar",
-        "talent_books": ["Gold", "Prosperity", "Diligence"],
-        "artifact_sets": [
-            {
-                "name": "Tenacity of the Millelith",
-                "main_stats": {"sands": "HP%", "goblet": "Geo DMG Bonus", "circlet": "CRIT Rate"},
-                "substats": ["HP%", "Energy Recharge", "CRIT Rate", "DEF%"]
-            },
-            {
-                "name": "Archaic Petra",
-                "main_stats": {"sands": "HP%", "goblet": "Geo DMG Bonus", "circlet": "CRIT Rate"},
-                "substats": ["HP%", "DEF%", "Elemental Mastery", "CRIT Rate"]
-            }
-        ]
-    },
-    {
-        "name": "Kazuha",
-        "element": "Anemo",
-        "weapon": "Sword",
-        "rarity": 5,
-        "region": "Inazuma",
-        "role": "Crowd Control",
-        "specialty": "Sea Ganoderma",
-        "boss_drop": "Marionette Core",
-        "talent_books": ["Freedom", "Transience", "Elegance"],
-        "artifact_sets": [
-            {
-                "name": "Viridescent Venerer",
-                "main_stats": {"sands": "ATK%", "goblet": "Anemo DMG Bonus", "circlet": "Elemental Mastery"},
-                "substats": ["ATK%", "EM", "CRIT Rate", "Energy Recharge"]
-            },
-            {
-                "name": "The Noblesse Oblige",
-                "main_stats": {"sands": "ATK%", "goblet": "Anemo DMG Bonus", "circlet": "ATK%"},
-                "substats": ["ATK%", "Energy Recharge", "CRIT Rate", "Elemental Mastery"]
-            }
-        ]
-    },
-]
-
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     init_db()
-    sync_task = asyncio.create_task(cloud_sync_worker())
-    try:
-        yield
-    finally:
-        sync_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await sync_task
+    yield
 
 
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="GenshinNexus", lifespan=lifespan)
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    client_ip = request.client.host if request.client else "unknown"
+    ban = flag_client(client_ip)
+    return JSONResponse(
+        {
+            "detail": "The request limit was reached. Automated request defenses are active.",
+            "challenge_url": challenge_url(ban),
+        },
+        status_code=429,
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(CORS_ALLOWED_ORIGINS),
@@ -439,6 +349,7 @@ app.add_middleware(
     allow_headers=["Content-Type"],
     max_age=600,
 )
+app.add_middleware(VelocityBanMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -461,100 +372,6 @@ def init_db() -> None:
             )
             """
         )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS characters (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL,
-                element TEXT NOT NULL,
-                weapon TEXT NOT NULL,
-                rarity INTEGER NOT NULL,
-                region TEXT NOT NULL,
-                role TEXT NOT NULL,
-                specialty TEXT NOT NULL,
-                boss_drop TEXT NOT NULL,
-                talent_books TEXT NOT NULL,
-                artifact_sets TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS api_cache (
-                cache_key TEXT PRIMARY KEY,
-                payload TEXT NOT NULL,
-                cached_at REAL NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS cloud_cache (
-                slug TEXT PRIMARY KEY,
-                data_json TEXT NOT NULL,
-                timestamp INTEGER NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO cloud_cache (slug, data_json, timestamp)
-            SELECT cache_key, payload, CAST(cached_at AS INTEGER) FROM api_cache
-            """
-        )
-        conn.commit()
-
-        archive_characters = [*BASE_CHARACTERS, *(mock_character(name) for name in CUSTOM_CHARACTER_NAMES)]
-        for character in archive_characters:
-            row = conn.execute("SELECT 1 FROM characters WHERE name = ?", (character["name"],)).fetchone()
-            if row is None:
-                conn.execute(
-                    """
-                    INSERT INTO characters (
-                        name, element, weapon, rarity, region, role, specialty,
-                        boss_drop, talent_books, artifact_sets
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        character["name"],
-                        character["element"],
-                        character["weapon"],
-                        character["rarity"],
-                        character["region"],
-                        character["role"],
-                        character["specialty"],
-                        character["boss_drop"],
-                        json.dumps(character["talent_books"]),
-                        json.dumps(character["artifact_sets"]),
-                    ),
-                )
-        conn.commit()
-
-
-def read_api_cache(cache_key: str, allow_expired: bool = False) -> Any | None:
-    with open_database() as conn:
-        row = conn.execute(
-            "SELECT data_json, timestamp FROM cloud_cache WHERE slug = ?",
-            (cache_key,),
-        ).fetchone()
-    if row is None or (not allow_expired and time.time() - row[1] >= CACHE_TTL_SECONDS):
-        return None
-    return json.loads(row[0])
-
-
-def write_api_cache(cache_key: str, payload: Any) -> None:
-    with open_database() as conn:
-        conn.execute(
-            """
-            INSERT INTO cloud_cache (slug, data_json, timestamp)
-            VALUES (?, ?, ?)
-            ON CONFLICT(slug) DO UPDATE SET
-                data_json = excluded.data_json,
-                timestamp = excluded.timestamp
-            """,
-            (cache_key, json.dumps(payload), int(time.time())),
-        )
         conn.commit()
 
 
@@ -565,157 +382,99 @@ async def fetch_cloud_json(
     force_refresh: bool = False,
     base_url: str = API_BASE_URL,
 ) -> Any:
-    cached = None if force_refresh else read_api_cache(cache_key)
-    if cached is not None:
-        return cached
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        response = await client.get(f"{base_url.rstrip('/')}/{path.lstrip('/')}")
+    response.raise_for_status()
+    return response.json()
 
+
+def stream_json(payload: Any) -> StreamingResponse:
+    encoder = json.JSONEncoder(separators=(",", ":"), ensure_ascii=False)
+
+    def chunks():
+        for fragment in encoder.iterencode(payload):
+            yield fragment.encode("utf-8")
+
+    return StreamingResponse(chunks(), media_type="application/json")
+
+
+async def fetch_provider_json(url: str | None, source_name: str) -> Any:
+    if not url:
+        raise HTTPException(status_code=503, detail=f"{source_name} feed is not configured.")
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            response = await client.get(f"{base_url.rstrip('/')}/{path.lstrip('/')}")
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=False) as client:
+            response = await client.get(url, headers={"Accept": "application/json"})
         response.raise_for_status()
-        payload = response.json()
-        write_api_cache(cache_key, payload)
-        return payload
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code != 404:
-            stale = read_api_cache(cache_key, allow_expired=True)
-            if stale is not None:
-                return stale
+        if len(response.content) > 8 * 1024 * 1024:
+            raise HTTPException(status_code=502, detail=f"{source_name} feed exceeds the 8 MB response limit.")
+        return response.json()
+    except HTTPException:
         raise
-    except (httpx.HTTPError, ValueError):
-        stale = read_api_cache(cache_key, allow_expired=True)
-        if stale is not None:
-            return stale
-        raise
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"{source_name} feed is unavailable or invalid.") from exc
 
 
-async def cloud_sync_pass() -> dict[str, Any]:
-    sync_targets = {
-        "characters": ("catalog:characters", "characters", API_BASE_URL),
-        "weapons": ("catalog:weapons", "weapons", API_BASE_URL),
-        "artifacts": ("catalog:artifacts", "artifacts", API_BASE_URL),
-        "materials": ("catalog:materials", "materials", API_BASE_URL),
-        "food": ("catalog:food", "foods", API_BASE_URL),
-        "github": ("sync:github-tree", GITHUB_TREE_PATH, "https://api.github.com"),
-        "google": ("sync:google-search", "customsearch/v1", "https://www.googleapis.com"),
-    }
+def suggest_abyss_teams(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    roster = payload.get("character_pool", [])
+    floors = payload.get("floors", [])
+    if not isinstance(roster, list) or not roster:
+        return []
 
-    async def refresh_source(key: str, source: tuple[str, str, str]):
-        cache_key, path, base_url = source
-        if key == "google":
-            if not GOOGLE_CSE_API_KEY or not GOOGLE_CSE_ID:
-                return key, {"status": "disabled", "reason": "Google Custom Search credentials are not configured."}
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                response = await client.get(
-                    f"{base_url.rstrip('/')}/{path.lstrip('/')}",
-                    params={
-                        "key": GOOGLE_CSE_API_KEY,
-                        "cx": GOOGLE_CSE_ID,
-                        "q": "Genshin Impact event wish banner schedule character data",
-                        "num": 10,
-                    },
-                )
-            response.raise_for_status()
-            search_data = response.json()
-            return key, {
-                "status": "ok",
-                "results": [
-                    {"title": item.get("title", ""), "link": item.get("link", "")}
-                    for item in search_data.get("items", [])[:10]
-                ],
-            }
-        if key == "github":
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                response = await client.get(
-                    f"{base_url.rstrip('/')}/{path.lstrip('/')}",
-                    headers={"Accept": "application/vnd.github+json"},
-                )
-            response.raise_for_status()
-            return key, response.json()
-        return key, await fetch_cloud_json(cache_key, path, force_refresh=True, base_url=base_url)
-
-    results = await asyncio.gather(
-        *(refresh_source(key, source) for key, source in sync_targets.items()),
-        return_exceptions=True,
-    )
-    sources: dict[str, dict[str, Any]] = {}
-    for (source_key, _), result in zip(sync_targets.items(), results):
-        if isinstance(result, BaseException):
-            sources[source_key] = {"status": "error", "detail": str(result)[:180]}
-            continue
-        key, payload = result
-        if key == "google":
-            status = payload.get("status", "ok")
-            summary = {"status": status, "items": len(payload.get("results", []))}
-            if payload.get("results"):
-                write_api_cache("sync:google-summary", payload["results"])
-            sources[key] = summary
-            continue
-        if key == "github":
-            tree = payload.get("tree", []) if isinstance(payload, dict) else []
-            paths = [
-                entry.get("path", "")
-                for entry in tree
-                if isinstance(entry, dict)
-                and any(term in entry.get("path", "").lower() for term in ("character", "weapon", "artifact"))
-            ]
-            summary = {
-                "sha": payload.get("sha"),
-                "matching_paths": len(paths),
-                "sample_paths": paths[:40],
-            }
-            write_api_cache("sync:github-summary", summary)
-            sources[key] = {"status": "ok", **summary}
-        else:
-            sources[key] = {
-                "status": "ok",
-                "items": len(payload) if isinstance(payload, list) else 0,
-            }
-
-    previous = read_api_cache("sync:state", allow_expired=True) or {}
-    state = {
-        "status": "degraded" if any(source.get("status") == "error" for source in sources.values()) else "online" if sources else "degraded",
-        "revision": int(time.time()),
-        "last_synced_at": datetime.now(timezone.utc).isoformat(),
-        "interval_seconds": SYNC_INTERVAL_SECONDS,
-        "sources": sources,
-        "previous_revision": previous.get("revision"),
-    }
-    write_api_cache("sync:state", state)
-    return state
-
-
-async def cloud_sync_worker() -> None:
-    while True:
-        await asyncio.sleep(SYNC_INTERVAL_SECONDS)
-        try:
-            await cloud_sync_pass()
-        except Exception:
-            previous = read_api_cache("sync:state", allow_expired=True) or {}
-            previous.update({"status": "degraded", "last_error_at": datetime.now(timezone.utc).isoformat()})
-            write_api_cache("sync:state", previous)
-
-
-def get_sync_state() -> dict[str, Any]:
-    return read_api_cache("sync:state", allow_expired=True) or {
-        "status": "starting",
-        "revision": 0,
-        "last_synced_at": None,
-        "interval_seconds": SYNC_INTERVAL_SECONDS,
-        "sources": {},
-    }
-
-
-def get_live_banners(now: datetime | None = None) -> dict[str, Any]:
-    current_time = now or datetime.now(timezone.utc)
-    parsed = [
-        {
-            **phase,
-            "start_epoch": int(datetime.fromisoformat(phase["starts_at"].replace("Z", "+00:00")).timestamp()),
-            "end_epoch": int(datetime.fromisoformat(phase["ends_at"].replace("Z", "+00:00")).timestamp()),
+    suggestions = []
+    for floor in floors:
+        required = {
+            element
+            for half in floor.get("halves", [])
+            for element in half.get("recommended_elements", [])
         }
-        for phase in BANNER_PHASES
-    ]
+        members = []
+        for candidate in roster:
+            if not isinstance(candidate, dict) or not candidate.get("name"):
+                continue
+            if candidate.get("element") in required and candidate not in members:
+                members.append(candidate)
+            if len(members) == 4:
+                break
+        for candidate in roster:
+            if len(members) == 4:
+                break
+            if isinstance(candidate, dict) and candidate.get("name") and candidate not in members:
+                members.append(candidate)
+        counts: dict[str, int] = {}
+        for member in members:
+            element = member.get("element")
+            counts[element] = counts.get(element, 0) + 1
+        resonances = [
+            {"element": element, "effect": ELEMENT_RESONANCE[element]}
+            for element, count in counts.items()
+            if count >= 2 and element in ELEMENT_RESONANCE
+        ]
+        if members:
+            suggestions.append({
+                "floor": floor.get("floor"),
+                "members": members,
+                "resonances": resonances,
+                "matched_elements": sorted(required.intersection(counts)),
+                "algorithm": "element-match-v1",
+            })
+    return suggestions
+
+
+async def get_live_banners(now: datetime | None = None) -> dict[str, Any]:
+    feed = await fetch_provider_json(BANNER_DATA_URL, "Banner schedule")
+    phases = feed.get("phases", []) if isinstance(feed, dict) else []
+    if not isinstance(phases, list):
+        raise HTTPException(status_code=502, detail="Banner schedule feed has an invalid phase list.")
+    current_time = now or datetime.now(timezone.utc)
+    parsed = []
+    try:
+        for phase in phases:
+            item = dict(phase)
+            item["start_epoch"] = int(datetime.fromisoformat(item["starts_at"].replace("Z", "+00:00")).timestamp())
+            item["end_epoch"] = int(datetime.fromisoformat(item["ends_at"].replace("Z", "+00:00")).timestamp())
+            parsed.append(item)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Banner schedule feed has invalid phase dates.") from exc
     active = next((phase for phase in parsed if phase["start_epoch"] <= current_time.timestamp() < phase["end_epoch"]), None)
     upcoming = next((phase for phase in parsed if phase["start_epoch"] > current_time.timestamp()), None)
     transition = active["end_epoch"] if active else upcoming["start_epoch"] if upcoming else None
@@ -731,61 +490,37 @@ def get_live_banners(now: datetime | None = None) -> dict[str, Any]:
 
 
 async def get_cloud_character_slugs() -> list[str]:
-    payload = await fetch_cloud_json("catalog:characters", "characters")
+    try:
+        payload = await fetch_cloud_json(
+            "catalog:characters",
+            "characters",
+            force_refresh=True,
+        )
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="The live character catalog is unavailable.") from exc
     if not isinstance(payload, list):
         raise ValueError("The cloud character catalog has an unexpected format.")
     return [api_character_slug(str(value)) for value in payload if isinstance(value, str)]
 
 
 def find_local_character_by_api_slug(slug: str) -> dict[str, Any] | None:
-    normalized_slug = api_character_slug(slug)
-    return next(
-        (
-            character
-            for character in get_character_catalog()
-            if api_character_slug(character["name"]) == normalized_slug
-            or character_slug(character["name"]) == character_slug(slug)
-        ),
-        None,
-    )
+    return None
 
 
 async def get_character_mappings() -> list[dict[str, Any]]:
-    try:
-        slugs = await get_cloud_character_slugs()
-    except (httpx.HTTPError, ValueError):
-        slugs = [api_character_slug(character["name"]) for character in get_character_catalog()]
-
+    slugs = await get_cloud_character_slugs()
     mappings = []
-    seen_slugs = set()
     for slug in slugs:
-        character = find_local_character_by_api_slug(slug)
-        display_name = character["name"] if character else display_name_for_slug(slug)
         mappings.append(
             {
-                "name": display_name,
+                "name": display_name_for_slug(slug),
                 "slug": slug,
-                "element": character["element"] if character else "Unknown",
-                "weapon": character["weapon"] if character else "Unknown",
-                "rarity": character["rarity"] if character else 0,
+                "element": "Unknown",
+                "weapon": "Unknown",
+                "rarity": 0,
                 "icon_url": f"{CHARACTER_API_URL}/{slug}/icon",
             }
         )
-        seen_slugs.add(slug)
-
-    for character in get_character_catalog():
-        slug = api_character_slug(character["name"])
-        if slug not in seen_slugs:
-            mappings.append(
-                {
-                    "name": character["name"],
-                    "slug": slug,
-                    "element": character["element"],
-                    "weapon": character["weapon"],
-                    "rarity": character["rarity"],
-                    "icon_url": f"{CHARACTER_API_URL}/{slug}/icon",
-                }
-            )
     return mappings
 
 
@@ -816,64 +551,11 @@ def decode_base62(value: str) -> int:
 
 
 def get_character_catalog() -> list[dict[str, Any]]:
-    with open_database() as conn:
-        rows = conn.execute(
-            """
-            SELECT name, element, weapon, rarity, region, role, specialty, boss_drop,
-                   talent_books, artifact_sets
-            FROM characters ORDER BY name
-            """
-        ).fetchall()
-
-    characters = []
-    for row in rows:
-        characters.append(
-            {
-                "name": row[0],
-                "slug": api_character_slug(row[0]),
-                "element": row[1],
-                "weapon": row[2],
-                "rarity": row[3],
-                "region": row[4],
-                "role": row[5],
-                "specialty": row[6],
-                "boss_drop": row[7],
-                "talent_books": json.loads(row[8]),
-                "artifact_sets": json.loads(row[9]),
-            }
-        )
-    return characters
+    return []
 
 
 def find_character_by_slug(slug: str) -> dict[str, Any] | None:
     return find_local_character_by_api_slug(slug)
-
-
-def save_mock_character(display_name: str) -> dict[str, Any]:
-    character = mock_character(display_name)
-    with open_database() as conn:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO characters (
-                name, element, weapon, rarity, region, role, specialty,
-                boss_drop, talent_books, artifact_sets
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                character["name"],
-                character["element"],
-                character["weapon"],
-                character["rarity"],
-                character["region"],
-                character["role"],
-                character["specialty"],
-                character["boss_drop"],
-                json.dumps(character["talent_books"]),
-                json.dumps(character["artifact_sets"]),
-            ),
-        )
-        conn.commit()
-    return find_character_by_slug(character_slug(display_name)) or character
 
 
 def calculate_materials(character_name: str, current_level: int, target_level: int, talent_goals: dict[str, int]) -> dict[str, Any]:
@@ -950,7 +632,8 @@ def calculate_cloud_materials(
         f"book_{index}": max(0, int(talent_goals.get(talent, 1)) - 1) * 3 + 2
         for index, talent in enumerate(("normal", "skill", "burst"), start=1)
     }
-    local_character = find_local_character_by_api_slug(character.get("slug", "")) or {}
+    specialty_name = str(character.get("specialty", "Regional specialty"))
+    boss_name = str(character.get("boss_material", "Boss material"))
     mora = totals.get("Mora", max(0, target_level - current_level) * 12000)
     required_materials = [
         {"name": name, "amount": amount}
@@ -964,10 +647,10 @@ def calculate_cloud_materials(
         "current_level": current_level,
         "target_level": target_level,
         "level_gap": target_level - current_level,
-        "regional_specialty": totals.get(local_character.get("specialty", ""), 0),
-        "specialty_name": local_character.get("specialty", "Regional specialty"),
-        "boss_drop": totals.get(local_character.get("boss_drop", ""), 0),
-        "boss_name": local_character.get("boss_drop", "Boss material"),
+        "regional_specialty": totals.get(specialty_name, 0),
+        "specialty_name": specialty_name,
+        "boss_drop": totals.get(boss_name, 0),
+        "boss_name": boss_name,
         "talent_books": {
             f"book_{letter}": talent_book_counts[f"book_{index}"]
             for index, letter in enumerate(("a", "b", "c"), start=1)
@@ -980,6 +663,56 @@ def calculate_cloud_materials(
             f"and {mora:,} Mora from level {current_level} to {target_level}."
         ),
     }
+
+
+def render_security_challenge(token: str, remaining_seconds: int, status_code: int = 200) -> HTMLResponse:
+    page = f"""<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verify request · GenshinNexus</title>
+<body style="margin:0;background:#111827;color:#f3f4f6;font:16px system-ui;min-height:100vh;display:grid;place-items:center">
+<main style="width:min(440px,calc(100% - 40px));padding:24px;border:1px solid #374151;border-radius:12px;background:#1f2937">
+<p style="color:#7ce0d4;font-size:12px;font-weight:700;letter-spacing:.12em">GENSHINNEXUS SECURITY</p>
+<h1>Confirm this is a person</h1><p id="wait-copy">Please wait {remaining_seconds} seconds before confirming.</p>
+<form method="post" action="/security/challenge/{token}/verify"><button id="verify-button" type="submit" {'disabled' if remaining_seconds else ''} style="padding:11px 14px;border:0;border-radius:7px;background:#f1c56f;color:#111827;font-weight:700;cursor:pointer">Verify and return</button></form>
+</main><script>
+let remaining={remaining_seconds};const button=document.getElementById('verify-button');const copy=document.getElementById('wait-copy');
+const countdown=window.setInterval(()=>{{remaining=Math.max(0,remaining-1);copy.textContent=remaining?`Please wait ${{remaining}} seconds before confirming.`:'You can now confirm and return.';if(!remaining){{button.disabled=false;window.clearInterval(countdown);}}}},1000);
+</script></body></html>"""
+    return HTMLResponse(page, status_code=status_code)
+
+
+@app.get("/security/challenge/{token}", response_class=HTMLResponse)
+def start_security_challenge(request: Request, token: str):
+    client_ip = request.client.host if request.client else "unknown"
+    if not re.fullmatch(r"[A-Za-z0-9_-]{30,}", token):
+        raise HTTPException(status_code=404, detail="Verification challenge not found.")
+    with VELOCITY_LOCK:
+        ban = BANNED_CLIENTS.get(client_ip)
+        if ban is None or not secrets.compare_digest(token, ban["token"]):
+            raise HTTPException(status_code=404, detail="Verification challenge not found.")
+        if ban["challenge_started_at"] is None:
+            ban["challenge_started_at"] = time.time()
+            ban["last_blocked_at"] = ban["challenge_started_at"]
+        remaining = max(0, CHALLENGE_WAIT_SECONDS - int(time.time() - ban["challenge_started_at"]))
+    return render_security_challenge(token, remaining)
+
+
+@app.post("/security/challenge/{token}/verify")
+def verify_security_challenge(request: Request, token: str):
+    client_ip = request.client.host if request.client else "unknown"
+    with VELOCITY_LOCK:
+        ban = BANNED_CLIENTS.get(client_ip)
+        if ban is None or not secrets.compare_digest(token, ban["token"]):
+            raise HTTPException(status_code=404, detail="Verification challenge not found.")
+        started_at = ban["challenge_started_at"]
+        if started_at is None:
+            raise HTTPException(status_code=400, detail="Open the verification challenge first.")
+        remaining = max(0, CHALLENGE_WAIT_SECONDS - int(time.time() - started_at))
+        if remaining:
+            return render_security_challenge(token, remaining, status_code=429)
+        BANNED_CLIENTS.pop(client_ip, None)
+        CLIENT_REQUESTS.pop(client_ip, None)
+    return RedirectResponse(url="/", status_code=303)
 
 
 @app.get("/")
@@ -995,119 +728,194 @@ def archive() -> FileResponse:
 @app.get("/api/characters")
 @limiter.limit("10/minute")
 async def get_characters(request: Request):
-    return await get_character_mappings()
+    return stream_json(await get_character_mappings())
 
 
 @app.get("/api/banners")
 @app.get("/api/banners/live")
 @limiter.limit("10/minute")
 async def banners(request: Request):
-    return get_live_banners()
+    return stream_json(await get_live_banners())
+
+
+async def load_abyss_feed() -> dict[str, Any]:
+    payload = await fetch_provider_json(ABYSS_DATA_URL, "Abyss rotation")
+    if not isinstance(payload, dict) or not isinstance(payload.get("floors"), list) or len(payload["floors"]) != 12:
+        raise HTTPException(status_code=502, detail="Abyss feed must provide exactly 12 floor records.")
+    try:
+        payload["floors"] = sorted(payload["floors"], key=lambda floor: int(floor["floor"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Abyss feed floor numbers are invalid.") from exc
+    if [floor["floor"] for floor in payload["floors"]] != list(range(1, 13)):
+        raise HTTPException(status_code=502, detail="Abyss feed must contain floors 1 through 12 exactly once.")
+    try:
+        enemies = await fetch_cloud_json(
+            "catalog:enemies",
+            "enemies",
+            force_refresh=True,
+        )
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="The live enemy asset catalog is unavailable.") from exc
+    enemy_slugs = set(enemies) if isinstance(enemies, list) else set()
+    for floor in payload["floors"]:
+        if not isinstance(floor, dict):
+            raise HTTPException(status_code=502, detail="Abyss feed contains an invalid floor record.")
+        if not isinstance(floor.get("halves"), list) or not isinstance(floor.get("chambers"), list):
+            raise HTTPException(status_code=502, detail="Each Abyss floor must provide halves and chambers.")
+        if not isinstance(floor.get("blessing"), dict):
+            raise HTTPException(status_code=502, detail="Each Abyss floor must provide a blessing or disorder record.")
+        floor.setdefault("cycle", payload.get("cycle", "Abyss rotation"))
+        floor.setdefault("data_status", "Live provider feed")
+        for half in floor["halves"]:
+            if not isinstance(half, dict):
+                raise HTTPException(status_code=502, detail="Abyss feed contains an invalid half record.")
+            half.setdefault("disorders", [])
+            half.setdefault("recommended_elements", [])
+        assets = []
+        for chamber in floor.get("chambers", []):
+            if not isinstance(chamber, dict):
+                raise HTTPException(status_code=502, detail="Abyss feed contains an invalid chamber record.")
+            chamber.setdefault("recommended_elements", [])
+            chamber.setdefault("strategy", "Use the listed enemy lineup to plan elemental coverage.")
+            for half_key in ("first_half_enemies", "second_half_enemies"):
+                names = []
+                for enemy in chamber.get(half_key, []):
+                    enemy_name = enemy.get("name", "Unknown") if isinstance(enemy, dict) else str(enemy)
+                    names.append(enemy_name)
+                    slug = character_slug(enemy_name)
+                    asset_slug = slug if slug in enemy_slugs else "hilichurl"
+                    assets.append({
+                        "name": enemy_name,
+                        "image_url": f"{API_BASE_URL}/enemies/{asset_slug}/icon",
+                    })
+                chamber[half_key] = names
+        floor["enemy_assets"] = assets
+        floor["layout_image_url"] = assets[0]["image_url"] if assets else f"{API_BASE_URL}/enemies/hilichurl/icon"
+    payload["teams"] = payload.get("teams") or suggest_abyss_teams(payload)
+    return payload
+
+
+@app.get("/api/abyss")
+@app.get("/api/abyss/all-floors")
+@limiter.limit("10/minute")
+async def abyss_matrix(request: Request):
+    return stream_json(await load_abyss_feed())
 
 
 @app.get("/api/abyss/floor12")
 @limiter.limit("10/minute")
 async def abyss_floor12(request: Request):
-    return ABYSS_FLOOR_12
+    payload = await load_abyss_feed()
+    return stream_json(payload["floors"][11])
 
 
-@app.get("/api/sync-archive")
+@app.get("/api/abyss/{floor_number}")
 @limiter.limit("10/minute")
-async def sync_archive(request: Request):
-    return get_sync_state()
+async def abyss_floor(request: Request, floor_number: int):
+    if not 1 <= floor_number <= 12:
+        raise HTTPException(status_code=404, detail="Abyss floor must be between 1 and 12.")
+    payload = await load_abyss_feed()
+    return stream_json(payload["floors"][floor_number - 1])
+
+
+@app.get("/api/theater/current")
+@limiter.limit("10/minute")
+async def current_theater(request: Request):
+    return stream_json(await load_theater_feed())
+
+
+async def load_theater_feed() -> dict[str, Any]:
+    payload = await fetch_provider_json(THEATER_DATA_URL, "Imaginarium Theater")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="Theater feed must return a JSON object.")
+    return payload
 
 
 @app.get("/characters/{character_name}")
 @limiter.limit("10/minute")
 async def get_character_details(request: Request, character_name: str):
-    return await load_character_details(character_name)
+    return stream_json(await load_character_details(character_name))
 
 
 async def load_character_details(character_name: str) -> dict[str, Any]:
     slug = api_character_slug(character_name)
-    local_character = find_local_character_by_api_slug(slug)
     try:
         cloud_slugs = await get_cloud_character_slugs()
-    except (httpx.HTTPError, ValueError):
-        if local_character is not None:
-            return local_character | {"source": "database"}
-        raise HTTPException(status_code=502, detail="The cloud character catalog is unavailable.")
+    except HTTPException:
+        raise
 
     if slug not in cloud_slugs:
-        if local_character is not None:
-            return local_character | {"source": "database"}
         raise HTTPException(status_code=404, detail="Character is not in the archive.")
 
     try:
-        api_data = await fetch_cloud_json(f"character:{slug}", f"characters/{slug}")
+        api_data = await fetch_cloud_json(
+            f"character:{slug}",
+            f"characters/{slug}",
+            force_refresh=True,
+        )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
-            display_name = local_character["name"] if local_character else display_name_for_slug(slug)
-            return save_mock_character(display_name) | {"source": "database"}
-        if local_character is not None:
-            return local_character | {"source": "database"}
+            raise HTTPException(status_code=404, detail="Character details are not available from the provider.") from exc
         raise HTTPException(status_code=502, detail="The cloud character service is unavailable.") from exc
-    except (httpx.HTTPError, ValueError):
-        if local_character is not None:
-            return local_character | {"source": "database"}
-        raise HTTPException(status_code=502, detail="The cloud character service is unavailable.")
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="The cloud character service is unavailable.") from exc
 
     if not isinstance(api_data, dict):
         raise HTTPException(status_code=502, detail="The cloud character response is invalid.")
 
-    character = local_character or mock_character(str(api_data.get("name") or display_name_for_slug(slug)))
-    character.update(
-        {
-            "name": api_data.get("name", character["name"]),
-            "slug": slug,
-            "element": api_data.get("vision", character["element"]),
-            "weapon": api_data.get("weapon", character["weapon"]),
-            "rarity": api_data.get("rarity", character["rarity"]),
-            "region": api_data.get("nation", character["region"]),
-            "description": api_data.get("description", ""),
-            "ascension_materials": api_data.get("ascension_materials", {}),
-            "talent_materials": api_data.get("talent_materials", {}),
-            "icon_url": f"{CHARACTER_API_URL}/{slug}/icon",
-            "api_data": api_data,
-            "source": "cloud",
-        }
-    )
-    return character
+    return api_data | {
+        "name": api_data.get("name") or display_name_for_slug(slug),
+        "slug": slug,
+        "element": api_data.get("vision", "Unknown"),
+        "region": api_data.get("nation", "Unknown"),
+        "icon_url": f"{CHARACTER_API_URL}/{slug}/icon",
+        "source": "cloud",
+    }
 
 
 @app.get("/api/catalog/{category}")
 @limiter.limit("10/minute")
 async def get_catalog_category(request: Request, category: str):
     if category == "characters":
-        return {"items": await get_character_mappings(), "source": "cloud"}
+        return stream_json({"items": await get_character_mappings(), "source": "cloud"})
     if category == "banners":
-        return get_live_banners()
+        return stream_json(await get_live_banners())
     if category == "spiral-abyss":
-        return ABYSS_FLOOR_12
+        return stream_json(await load_abyss_feed())
+    if category == "imaginarium-theater":
+        return stream_json(await load_theater_feed())
 
     cloud_path = CLOUD_CATALOG_PATHS.get(category)
     if cloud_path is not None:
         try:
-            payload = await fetch_cloud_json(f"catalog:{category}", cloud_path)
+            payload = await fetch_cloud_json(
+                f"catalog:{category}",
+                cloud_path,
+                force_refresh=True,
+            )
         except (httpx.HTTPError, ValueError):
-            payload = []
+            raise HTTPException(status_code=502, detail=f"The live {category} catalog is unavailable.")
         items = [
             {
                 "slug": str(item),
                 "name": display_name_for_slug(str(item)),
-                "icon_url": f"{API_BASE_URL}/{cloud_path}/{item}/icon",
+                "icon_url": (
+                    f"{API_BASE_URL}/artifacts/{item}/flower-of-life"
+                    if category == "artifacts"
+                    else f"{API_BASE_URL}/{cloud_path}/{item}/icon"
+                ),
             }
             for item in payload
             if isinstance(item, str)
         ] if isinstance(payload, list) else []
-        return {"items": items, "source": "cloud"}
+        return stream_json({"items": items, "source": "cloud"})
 
     if category not in {
         "builds", "teams", "tierlist", "tcg", "tcg-best-decks",
         "leaderboard", "imaginarium-theater", "onslaught",
     }:
         raise HTTPException(status_code=404, detail="Unknown portal category.")
-    return {"items": [], "source": "portal", "category": category}
+    return stream_json({"items": [], "source": "portal", "category": category})
 
 
 @app.post("/api/build-plan")
@@ -1127,13 +935,12 @@ async def build_plan(request: Request, payload: dict):
     try:
         character = await load_character_details(character_slug_value)
         result = calculate_cloud_materials(character, current_level, target_level, talent_goals)
-        artifact_data = find_local_character_by_api_slug(character_slug_value) or {}
-        result["artifact_recommendations"] = artifact_data.get("artifact_sets", [])
+        result["artifact_recommendations"] = character.get("artifact_sets", [])
         result["character_info"] = {
             "element": character.get("element"),
             "weapon": character.get("weapon"),
             "rarity": character.get("rarity"),
-            "role": artifact_data.get("role", "Unassigned"),
+            "role": character.get("role", "Provider data unavailable"),
         }
         result["icon_url"] = character.get("icon_url")
         return result
@@ -1194,11 +1001,6 @@ def redirect_to_long_url(slug: str):
         )
 
     return RedirectResponse(url=row[0], status_code=307)
-
-
-@app.exception_handler(RateLimitExceeded)
-async def slowapi_rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
 
 
 if __name__ == "__main__":
