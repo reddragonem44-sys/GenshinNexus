@@ -30,7 +30,7 @@ DB_PATH = BASE_DIR / "urls.db"
 ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 SHORT_URL_PATTERN = re.compile(r"^https?://[^\s<>\"']+$", re.IGNORECASE)
 
-app = FastAPI(title="GenshinNexus")
+app = FastAPI(title="GenshinNexus", debug=True)
 
 # Global Multi-AI Security State Matrix
 IP_SPEED_TRACKER = {}
